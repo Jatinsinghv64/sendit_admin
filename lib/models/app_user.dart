@@ -1,38 +1,41 @@
-enum UserRole { superAdmin, manager, cashier, delivery }
-
 class AdminUser {
   final String uid;
   final String email;
   final String name;
-  final UserRole role;
+  final String role;
+  final Map<String, bool> permissions;
 
   AdminUser({
     required this.uid,
     required this.email,
     required this.name,
     required this.role,
+    required this.permissions,
   });
 
   factory AdminUser.fromMap(Map<String, dynamic> data, String uid) {
+    // 1. Safely parse the permissions map from Firestore
+    final Map<String, bool> parsedPermissions = {};
+
+    if (data['permissions'] != null && data['permissions'] is Map) {
+      final rawMap = data['permissions'] as Map<dynamic, dynamic>;
+      rawMap.forEach((key, value) {
+        parsedPermissions[key.toString()] = value == true;
+      });
+    }
+
     return AdminUser(
       uid: uid,
       email: data['email'] ?? '',
       name: data['name'] ?? 'Staff',
-      role: _parseRole(data['role']),
+      role: data['role'] ?? 'staff',
+      permissions: parsedPermissions,
     );
   }
 
-  static UserRole _parseRole(String? roleStr) {
-    switch (roleStr?.toLowerCase()) {
-      case 'superadmin': return UserRole.superAdmin;
-      case 'manager': return UserRole.manager;
-      case 'cashier': return UserRole.cashier;
-      case 'delivery': return UserRole.delivery;
-      default: return UserRole.cashier; // Default lowest privilege
-    }
-  }
-
-  bool get canManageInventory => role == UserRole.superAdmin || role == UserRole.manager;
-  bool get canViewAnalytics => role == UserRole.superAdmin;
-  bool get canPerformPos => role == UserRole.superAdmin || role == UserRole.manager || role == UserRole.cashier;
+  // 2. Getters that map directly to your Firestore keys
+  bool get canManageInventory => permissions['manage_inventory'] ?? false;
+  bool get canPerformPos => permissions['perform_pos'] ?? false;
+  bool get canViewAnalytics => permissions['view_analytics'] ?? false;
+  bool get canViewOrders => permissions['view_orders'] ?? false;
 }

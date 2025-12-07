@@ -1,9 +1,9 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:senditadmin/screens/main_admin_wrapper.dart';
 
 import 'models/services/admin_service.dart';
-import 'models/services/main_screen.dart';
 
 
 void main() async {
@@ -34,7 +34,7 @@ class AdminApp extends StatelessWidget {
           visualDensity: VisualDensity.adaptivePlatformDensity,
           scaffoldBackgroundColor: Colors.grey[100],
         ),
-        home: const MainScreen(),
+        home: const MainAdminWrapper(),
       ),
     );
   }

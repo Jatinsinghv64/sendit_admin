@@ -69,7 +69,7 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
                       sliver: SliverGrid(
                         gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                           maxCrossAxisExtent: 200,
-                          childAspectRatio: 0.70, // Taller to fit subcategory info
+                          childAspectRatio: 0.65, // Taller to fit controls
                           crossAxisSpacing: 16,
                           mainAxisSpacing: 16,
                         ),
@@ -162,9 +162,8 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
   }
 
   Widget _buildCategoryCard(Category category) {
-    // Determine a text color based on background brightness (simplified)
     final Color themeColor = category.color;
-    final bool isDark = themeColor.computeLuminance() < 0.5;
+    final bool isWhite = category.themeColor == 0xFFFFFFFF;
 
     return Container(
       decoration: BoxDecoration(
@@ -183,50 +182,47 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // 1. Image Header with Theme Color Overlay
+              // 1. Image Header
               Expanded(
-                flex: 4,
+                flex: 3,
                 child: Stack(
                   children: [
-                    // Background Color (Fallback)
                     Container(color: themeColor.withOpacity(0.1)),
-
-                    // Image
                     if (category.imageUrl.isNotEmpty)
                       Positioned.fill(
                         child: Image.network(
                           category.imageUrl,
                           fit: BoxFit.cover,
                           errorBuilder: (_,__,___) => Center(
-                            child: Icon(Icons.broken_image, color: themeColor.withOpacity(0.5)),
+                            child: Icon(Icons.broken_image, color: Colors.grey.shade300),
                           ),
                         ),
-                      ),
+                      )
+                    else
+                      const Center(child: Icon(Icons.image, color: Colors.grey)),
 
-                    // Edit Button Overlay
+                    // Edit Indicator
                     Positioned(
-                      top: 8,
-                      right: 8,
-                      child: CircleAvatar(
-                        radius: 14,
-                        backgroundColor: Colors.white.withOpacity(0.8),
+                      top: 8, right: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
                         child: const Icon(Icons.edit, size: 14, color: Colors.black87),
                       ),
-                    ),
+                    )
                   ],
                 ),
               ),
 
-              // 2. Details Section
+              // 2. Details & Management
               Expanded(
-                flex: 3,
+                flex: 4,
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // Name & Status
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -237,47 +233,52 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
                             overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Container(
-                                width: 6, height: 6,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: category.isActive ? Colors.green : Colors.red,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                category.isActive ? "Active" : "Inactive",
-                                style: TextStyle(fontSize: 11, color: Colors.grey.shade500, fontWeight: FontWeight.w500),
-                              ),
-                            ],
+                          Text(
+                            "${category.subCategories.length} Sub-categories",
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                           ),
                         ],
                       ),
 
-                      // Subcategories Pill
-                      if (category.subCategories.isNotEmpty)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: themeColor.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(6),
+                      const Divider(height: 12),
+
+                      // Status Toggle & Delete
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          // Status Switch
+                          Row(
+                            children: [
+                              SizedBox(
+                                height: 24,
+                                width: 35,
+                                child: Switch(
+                                  value: category.isActive,
+                                  onChanged: (val) => _toggleStatus(category, val),
+                                  activeColor: Colors.green,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                category.isActive ? "Active" : "Off",
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: category.isActive ? Colors.green : Colors.grey
+                                ),
+                              ),
+                            ],
                           ),
-                          child: Text(
-                            "${category.subCategories.length} Sub-cat",
-                            style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: themeColor.withOpacity(1.0).computeLuminance() > 0.8 ? Colors.black54 : themeColor
-                            ),
+
+                          // Delete Button
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            onPressed: () => _confirmDelete(category),
                           ),
-                        )
-                      else
-                        Text(
-                          "No sub-categories",
-                          style: TextStyle(fontSize: 10, color: Colors.grey.shade400),
-                        ),
+                        ],
+                      )
                     ],
                   ),
                 ),
@@ -287,6 +288,36 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _toggleStatus(Category category, bool newStatus) async {
+    HapticFeedback.selectionClick();
+    await _service.updateCategoryStatus(category.id, newStatus);
+  }
+
+  Future<void> _confirmDelete(Category category) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Delete Category?"),
+        content: Text("Are you sure you want to delete '${category.name}'? This cannot be undone."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _service.deleteCategory(category.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Category deleted")));
+      }
+    }
   }
 
   Future<void> _navigateToAddEdit(BuildContext context, {Category? category}) async {

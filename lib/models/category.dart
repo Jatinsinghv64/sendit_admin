@@ -6,7 +6,7 @@ class Category {
   final String name;
   final String imageUrl; // Maps to 'image' in DB
   final bool isActive;
-  final int themeColor; // Stored as int in DB
+  final int themeColor; // Stored as int (ARGB) in DB
   final List<SubCategory> subCategories;
   final DateTime? createdAt;
 
@@ -15,13 +15,14 @@ class Category {
     required this.name,
     required this.imageUrl,
     this.isActive = true,
-    this.themeColor = 0xFFFFFFFF,
+    this.themeColor = 0xFFFFFFFF, // Default to opaque white
     this.subCategories = const [],
     this.createdAt,
   });
 
   // Helper to get Color object safely
   Color get color {
+    // If 0, return white to avoid invisible backgrounds
     if (themeColor == 0) return Colors.white;
     return Color(themeColor);
   }
@@ -44,6 +45,7 @@ class Category {
       // Robust fallback for image key
       imageUrl: data['image'] ?? data['imageUrl'] ?? '',
       isActive: data['isActive'] ?? true,
+      // Parse themeColor safely
       themeColor: (data['themeColor'] is int) ? data['themeColor'] : 0xFFFFFFFF,
       subCategories: (data['subCategories'] as List<dynamic>?)
           ?.map((e) => SubCategory.fromMap(e as Map<String, dynamic>))

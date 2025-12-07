@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:uuid/uuid.dart';
 
-// Imports
 import '../app_user.dart';
 import '../inventory_model.dart';
 import '../product.dart';
@@ -16,12 +15,16 @@ class AdminService {
   final Uuid _uuid = const Uuid();
 
   // ==========================================
-  // 1. AUTH & ROLES (RBAC)
+  // 1. AUTH & ROLES
   // ==========================================
   Stream<AdminUser?> getCurrentUserStream(String uid) {
-    // Points to 'staff' collection for admin privileges
+    // This MUST return a Stream (using .snapshots()) to be real-time
+    // UPDATED: Listen specifically to the 'staff' collection.
+    // If a user exists in Auth but NOT in this collection, doc.exists will be false,
+    // causing the app to deny access.
     return _db.collection('staff').doc(uid).snapshots().map((doc) {
-      if (!doc.exists) return null; // Returns null if not a staff member
+      if (!doc.exists) return null;
+      // Triggers 'fromMap' every time data changes
       return AdminUser.fromMap(doc.data()!, doc.id);
     });
   }
@@ -29,11 +32,8 @@ class AdminService {
   // ==========================================
   // 2. CATEGORIES
   // ==========================================
-
-  // Renamed to 'getCategoriesStream' to match the new UI code
   Stream<List<Category>> getCategoriesStream() {
     return _db.collection('categories')
-    // Changed from 'updatedAt' to 'name' to ensure docs without timestamps still appear
         .orderBy('name')
         .snapshots()
         .map((snapshot) {
@@ -46,8 +46,11 @@ class AdminService {
     File? imageFile,
     String? id,
     String? existingImageUrl,
+    required int themeColor,
+    List<SubCategory> subCategories = const [],
   }) async {
     String imageUrl = existingImageUrl ?? '';
+
     if (imageFile != null) {
       final ref = _storage.ref().child('categories/${_uuid.v4()}.jpg');
       await ref.putFile(imageFile);
@@ -56,7 +59,10 @@ class AdminService {
 
     final data = {
       'name': name,
-      'imageUrl': imageUrl,
+      'image': imageUrl,
+      'isActive': true,
+      'themeColor': themeColor,
+      'subCategories': subCategories.map((s) => s.toMap()).toList(),
       'updatedAt': FieldValue.serverTimestamp(),
     };
 
@@ -68,6 +74,10 @@ class AdminService {
     }
   }
 
+  Future<void> updateCategoryStatus(String id, bool isActive) async {
+    await _db.collection('categories').doc(id).update({'isActive': isActive});
+  }
+
   Future<void> deleteCategory(String id) async {
     await _db.collection('categories').doc(id).delete();
   }
@@ -75,55 +85,38 @@ class AdminService {
   // ==========================================
   // 3. PRODUCTS (Inventory)
   // ==========================================
-
-  // Returns ProductSummary for the Data Tables (lighter object)
   Future<List<ProductSummary>> getProductsPage({
-    int limit = 500, // Default higher limit for admin view
+    int limit = 500,
     DocumentSnapshot? lastDoc,
     String? searchQuery,
   }) async {
     Query query = _db.collection('products').where('isActive', isEqualTo: true);
-
     if (searchQuery != null && searchQuery.isNotEmpty) {
-      // Requires 'searchKeywords' array in Firestore document
       query = query.where('searchKeywords', arrayContains: searchQuery.toLowerCase());
     } else {
       query = query.orderBy('createdAt', descending: true);
     }
-
-    if (lastDoc != null) {
-      query = query.startAfterDocument(lastDoc);
-    }
-
+    if (lastDoc != null) query = query.startAfterDocument(lastDoc);
     QuerySnapshot snapshot = await query.limit(limit).get();
-
     return snapshot.docs.map((doc) {
       return ProductSummary.fromMap(doc.data() as Map<String, dynamic>, doc.id);
     }).toList();
   }
 
-  // Returns full Product details for Editing
   Future<Product?> getProductById(String id) async {
     final doc = await _db.collection('products').doc(id).get();
     if (!doc.exists) return null;
     return Product.fromMap(doc.data()!, doc.id);
   }
 
-  Future<void> saveProduct({
-    required Product product,
-    File? imageFile,
-  }) async {
+  Future<void> saveProduct({required Product product, File? imageFile}) async {
     String thumbnailUrl = product.thumbnailUrl;
-
     if (imageFile != null) {
       final ref = _storage.ref().child('products/${_uuid.v4()}.jpg');
       await ref.putFile(imageFile);
       thumbnailUrl = await ref.getDownloadURL();
     }
-
-    // Generate keywords for search
     final keywords = _generateKeywords(product.name);
-
     final data = product.toMap();
     data['thumbnailUrl'] = thumbnailUrl;
     data['searchKeywords'] = keywords;
@@ -139,22 +132,17 @@ class AdminService {
   }
 
   Future<void> deleteProduct(String id) async {
-    // Soft delete by setting isActive to false
     await _db.collection('products').doc(id).update({'isActive': false});
   }
 
   // ==========================================
   // 4. ORDERS & TRANSACTIONS
   // ==========================================
-
   Stream<List<Order>> getOrdersStream({String statusFilter = 'all'}) {
     Query query = _db.collection('orders').orderBy('createdAt', descending: true);
-
     if (statusFilter != 'all') {
-      // Ensure status case matches DB (lowercase is safer)
       query = query.where('status', isEqualTo: statusFilter.toLowerCase());
     }
-
     return query.limit(100).snapshots().map((snapshot) {
       return snapshot.docs.map((doc) => Order.fromMap(doc.data() as Map<String, dynamic>, doc.id)).toList();
     });
@@ -167,7 +155,6 @@ class AdminService {
     });
   }
 
-  // Robust Transaction for POS to ensure stock isn't negative
   Future<void> processPosTransaction({
     required List<Map<String, dynamic>> items,
     required String userId,
@@ -175,76 +162,43 @@ class AdminService {
     required String paymentMethod,
   }) async {
     final orderRef = _db.collection('orders').doc();
-
     await _db.runTransaction((transaction) async {
-      // 1. Pre-fetch all products involved
       List<DocumentSnapshot> productSnaps = [];
       for (var item in items) {
         productSnaps.add(await transaction.get(_db.collection('products').doc(item['productId'])));
       }
-
-      // 2. Validate and Deduct Stock
       for (int i = 0; i < productSnaps.length; i++) {
-        if (!productSnaps[i].exists) throw Exception("Product not found: ${items[i]['productId']}");
-
+        if (!productSnaps[i].exists) throw Exception("Product not found");
         final data = productSnaps[i].data() as Map<String, dynamic>;
-
-        // Handle different data structures for stock (flat 'totalStock' vs nested 'stock.availableQty')
         int currentStock = 0;
         if (data.containsKey('totalStock')) {
           currentStock = (data['totalStock'] as num).toInt();
         } else if (data['stock'] != null && data['stock'] is Map) {
           currentStock = (data['stock']['availableQty'] as num).toInt();
         }
-
         final requestedQty = items[i]['quantity'] as int;
+        if (currentStock < requestedQty) throw Exception("Insufficient stock");
 
-        if (currentStock < requestedQty) {
-          throw Exception("Insufficient stock for ${data['name']}");
-        }
-
-        // Apply update based on structure
         if (data.containsKey('totalStock')) {
-          transaction.update(productSnaps[i].reference, {
-            'totalStock': currentStock - requestedQty,
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
+          transaction.update(productSnaps[i].reference, {'totalStock': currentStock - requestedQty});
         } else {
-          transaction.update(productSnaps[i].reference, {
-            'stock.availableQty': currentStock - requestedQty,
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
+          transaction.update(productSnaps[i].reference, {'stock.availableQty': currentStock - requestedQty});
         }
-
-        // Log the movement
-        final logRef = _db.collection('inventory_logs').doc();
-        transaction.set(logRef, {
-          'productId': productSnaps[i].id,
-          'productName': data['name'],
-          'action': 'sale_pos',
-          'change': -requestedQty,
-          'staffId': userId,
-          'timestamp': FieldValue.serverTimestamp(),
-        });
       }
-
-      // 3. Create the Order
       transaction.set(orderRef, {
-        'id': orderRef.id, // Explicit ID field often helpful
+        'id': orderRef.id,
         'userId': 'POS-WALKIN',
         'staffId': userId,
         'items': items,
         'total': totalAmount,
-        'status': 'delivered', // POS is instant
+        'status': 'delivered',
         'source': 'pos',
         'paymentMethod': paymentMethod,
         'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
       });
     });
   }
 
-  // Helper
   List<String> _generateKeywords(String title) {
     List<String> keywords = [];
     String temp = "";
