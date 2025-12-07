@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:provider/provider.dart';
 import '../models/app_user.dart';
-import '../models/inventory_model.dart';
 import '../models/services/admin_service.dart';
-
-// Screens
-import '../models/services/dashboard_screen.dart';
+import '../models/services/dashboard_screen.dart'; // Updated Dashboard import
 import 'Login_screen.dart';
 import 'pos_screen.dart';
 import 'product_list_screen.dart';
@@ -25,15 +22,12 @@ class MainAdminWrapper extends StatelessWidget {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
 
-        final firebaseUser = authSnapshot.data;
-
-        if (firebaseUser == null) {
+        if (!authSnapshot.hasData) {
           return const LoginScreen();
         }
 
-        // Fetch Staff Profile from 'staff' collection
         return StreamBuilder<AdminUser?>(
-          stream: AdminService().getCurrentUserStream(firebaseUser.uid),
+          stream: AdminService().getCurrentUserStream(authSnapshot.data!.uid),
           builder: (context, roleSnapshot) {
             if (roleSnapshot.connectionState == ConnectionState.waiting) {
               return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -41,127 +35,216 @@ class MainAdminWrapper extends StatelessWidget {
 
             final adminUser = roleSnapshot.data;
 
-            // SECURITY CHECK:
-            // If user is authenticated but has no document in 'staff' collection,
-            // they are NOT authorized to access the Admin Panel.
             if (adminUser == null) {
-              return Scaffold(
-                body: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.lock, size: 64, color: Colors.red),
-                      const SizedBox(height: 16),
-                      const Text(
-                        "Access Denied",
-                        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                      ),
-                      const Padding(
-                        padding: EdgeInsets.all(16.0),
-                        child: Text(
-                          "Your account is not authorized as Staff.\nPlease contact your administrator.",
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                      ElevatedButton(
-                        onPressed: () => FirebaseAuth.instance.signOut(),
-                        child: const Text("Logout"),
-                      ),
-                    ],
-                  ),
-                ),
-              );
+              return _buildAccessDenied(context);
             }
 
-            return _AdminLayout(user: adminUser);
+            return _ResponsiveAdminLayout(user: adminUser);
           },
         );
       },
     );
   }
+
+  Widget _buildAccessDenied(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.lock_person_outlined, size: 80, color: Colors.red),
+            const SizedBox(height: 20),
+            const Text("Access Denied", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            const Text("You do not have staff privileges.", style: TextStyle(color: Colors.grey)),
+            const SizedBox(height: 30),
+            OutlinedButton(
+              onPressed: () => FirebaseAuth.instance.signOut(),
+              child: const Text("Logout"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class _AdminLayout extends StatefulWidget {
+class _ResponsiveAdminLayout extends StatefulWidget {
   final AdminUser user;
-  const _AdminLayout({required this.user});
+  const _ResponsiveAdminLayout({required this.user});
 
   @override
-  State<_AdminLayout> createState() => _AdminLayoutState();
+  State<_ResponsiveAdminLayout> createState() => _ResponsiveAdminLayoutState();
 }
 
-class _AdminLayoutState extends State<_AdminLayout> {
+class _ResponsiveAdminLayoutState extends State<_ResponsiveAdminLayout> {
   int _selectedIndex = 0;
+  bool _isExtended = true;
 
   @override
   Widget build(BuildContext context) {
-    final destinations = <NavigationRailDestination>[];
-    final pages = <Widget>[];
+    final List<Map<String, dynamic>> menuItems = [];
 
-    // 1. Dashboard (Admins Only)
+    // --- RBAC Navigation Logic ---
     if (widget.user.canViewAnalytics) {
-      destinations.add(const NavigationRailDestination(
-          icon: Icon(Icons.dashboard), label: Text('Dashboard')
-      ));
-      pages.add(const DashboardScreen());
+      menuItems.add({'icon': Icons.dashboard_rounded, 'label': 'Dashboard', 'page': const DashboardScreen()});
     }
+    menuItems.add({'icon': Icons.receipt_long_rounded, 'label': 'Orders', 'page': const OrderListScreen()});
 
-    // 2. Inventory (Admins & Managers)
     if (widget.user.canManageInventory) {
-      destinations.add(const NavigationRailDestination(
-          icon: Icon(Icons.inventory), label: Text('Products')
-      ));
-      pages.add(const ProductListScreen());
-
-      destinations.add(const NavigationRailDestination(
-          icon: Icon(Icons.category), label: Text('Categories')
-      ));
-      pages.add(const CategoryListScreen());
+      menuItems.add({'icon': Icons.inventory_2_rounded, 'label': 'Products', 'page': const ProductListScreen()});
+      menuItems.add({'icon': Icons.category_rounded, 'label': 'Categories', 'page': const CategoryListScreen()});
     }
 
-    // 3. Orders (Everyone)
-    destinations.add(const NavigationRailDestination(
-        icon: Icon(Icons.receipt), label: Text('Orders')
-    ));
-    pages.add(const OrderListScreen());
-
-    // 4. POS (Cashiers & Admins)
     if (widget.user.canPerformPos) {
-      destinations.add(const NavigationRailDestination(
-          icon: Icon(Icons.point_of_sale), label: Text('POS')
-      ));
-      pages.add(const PosScreen());
+      menuItems.add({'icon': Icons.point_of_sale_rounded, 'label': 'POS Terminal', 'page': const PosScreen()});
     }
 
-    // Safety check
-    if (_selectedIndex >= pages.length) _selectedIndex = 0;
+    if (_selectedIndex >= menuItems.length) _selectedIndex = 0;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text("Welcome, ${widget.user.name}"),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () => FirebaseAuth.instance.signOut(),
-            tooltip: "Logout",
-          )
-        ],
-      ),
-      body: Row(
-        children: [
-          NavigationRail(
-            selectedIndex: _selectedIndex,
-            onDestinationSelected: (int index) => setState(() => _selectedIndex = index),
-            labelType: NavigationRailLabelType.all,
-            destinations: destinations,
-            leading: const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: CircleAvatar(child: Icon(Icons.person)),
+    // Use LayoutBuilder to switch between Mobile Drawer and Desktop Sidebar
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isDesktop = constraints.maxWidth > 900;
+
+        if (!isDesktop) {
+          // Mobile/Tablet View (Bottom Nav or Drawer)
+          return Scaffold(
+            appBar: AppBar(
+              title: Text(menuItems[_selectedIndex]['label']),
+              actions: [_buildUserAvatar()],
             ),
+            drawer: Drawer(
+              child: Column(
+                children: [
+                  _buildDrawerHeader(),
+                  Expanded(
+                    child: ListView(
+                      children: List.generate(menuItems.length, (index) {
+                        return ListTile(
+                          leading: Icon(menuItems[index]['icon']),
+                          title: Text(menuItems[index]['label']),
+                          selected: _selectedIndex == index,
+                          onTap: () {
+                            setState(() => _selectedIndex = index);
+                            Navigator.pop(context);
+                          },
+                        );
+                      }),
+                    ),
+                  ),
+                  _buildLogoutTile(),
+                ],
+              ),
+            ),
+            body: menuItems[_selectedIndex]['page'],
+          );
+        }
+
+        // Desktop View (Permanent Sidebar)
+        return Scaffold(
+          body: Row(
+            children: [
+              NavigationRail(
+                extended: _isExtended,
+                backgroundColor: Colors.white,
+                selectedIndex: _selectedIndex,
+                onDestinationSelected: (int index) => setState(() => _selectedIndex = index),
+                leading: Column(
+                  children: [
+                    const SizedBox(height: 20),
+                    Icon(Icons.local_shipping_rounded, size: 40, color: Theme.of(context).primaryColor),
+                    if (_isExtended) ...[
+                      const SizedBox(height: 10),
+                      const Text("SendIt Admin", style: TextStyle(fontWeight: FontWeight.bold)),
+                    ],
+                    const SizedBox(height: 20),
+                  ],
+                ),
+                trailing: Expanded(
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 20),
+                      child: IconButton(
+                        icon: Icon(_isExtended ? Icons.chevron_left : Icons.chevron_right),
+                        onPressed: () => setState(() => _isExtended = !_isExtended),
+                      ),
+                    ),
+                  ),
+                ),
+                destinations: menuItems.map((item) => NavigationRailDestination(
+                  icon: Icon(item['icon']),
+                  label: Text(item['label']),
+                )).toList(),
+              ),
+              const VerticalDivider(thickness: 1, width: 1),
+              Expanded(
+                child: Column(
+                  children: [
+                    // Desktop Top Bar
+                    Container(
+                      height: 60,
+                      color: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(menuItems[_selectedIndex]['label'], style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                          Row(
+                            children: [
+                              IconButton(onPressed: (){}, icon: const Icon(Icons.notifications_none)),
+                              const SizedBox(width: 16),
+                              _buildUserAvatar(),
+                            ],
+                          )
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Expanded(child: menuItems[_selectedIndex]['page']),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const VerticalDivider(thickness: 1, width: 1),
-          Expanded(child: pages[_selectedIndex]),
-        ],
+        );
+      },
+    );
+  }
+
+  Widget _buildUserAvatar() {
+    return PopupMenuButton(
+      itemBuilder: (context) => [
+        const PopupMenuItem(value: 'logout', child: Text("Logout")),
+      ],
+      onSelected: (val) {
+        if (val == 'logout') FirebaseAuth.instance.signOut();
+      },
+      child: CircleAvatar(
+        backgroundColor: Colors.indigo.shade50,
+        child: Text(widget.user.name[0].toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo)),
       ),
+    );
+  }
+
+  Widget _buildDrawerHeader() {
+    return UserAccountsDrawerHeader(
+      decoration: const BoxDecoration(color: Colors.indigo),
+      accountName: Text(widget.user.name),
+      accountEmail: Text(widget.user.email),
+      currentAccountPicture: CircleAvatar(
+        backgroundColor: Colors.white,
+        child: Text(widget.user.name[0], style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.indigo)),
+      ),
+    );
+  }
+
+  Widget _buildLogoutTile() {
+    return ListTile(
+      leading: const Icon(Icons.logout, color: Colors.red),
+      title: const Text("Logout", style: TextStyle(color: Colors.red)),
+      onTap: () => FirebaseAuth.instance.signOut(),
     );
   }
 }

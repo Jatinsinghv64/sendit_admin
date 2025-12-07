@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart' hide Order;
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:uuid/uuid.dart';
 
@@ -8,7 +8,7 @@ import '../app_user.dart';
 import '../inventory_model.dart';
 import '../product.dart';
 import '../category.dart';
-import '../order.dart' as app_model;
+import '../order.dart';
 
 class AdminService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -16,10 +16,10 @@ class AdminService {
   final Uuid _uuid = const Uuid();
 
   // ==========================================
-  // 1. AUTH & ROLES (RBAC) - UPDATED FOR 'STAFF' COLLECTION
+  // 1. AUTH & ROLES (RBAC)
   // ==========================================
   Stream<AdminUser?> getCurrentUserStream(String uid) {
-    // UPDATED: Now points to 'staff' collection instead of 'users'
+    // Points to 'staff' collection for admin privileges
     return _db.collection('staff').doc(uid).snapshots().map((doc) {
       if (!doc.exists) return null; // Returns null if not a staff member
       return AdminUser.fromMap(doc.data()!, doc.id);
@@ -29,9 +29,12 @@ class AdminService {
   // ==========================================
   // 2. CATEGORIES
   // ==========================================
-  Stream<List<Category>> getCategories() {
+
+  // Renamed to 'getCategoriesStream' to match the new UI code
+  Stream<List<Category>> getCategoriesStream() {
     return _db.collection('categories')
-        .orderBy('updatedAt', descending: true)
+    // Changed from 'updatedAt' to 'name' to ensure docs without timestamps still appear
+        .orderBy('name')
         .snapshots()
         .map((snapshot) {
       return snapshot.docs.map((doc) => Category.fromMap(doc.data(), doc.id)).toList();
@@ -70,17 +73,19 @@ class AdminService {
   }
 
   // ==========================================
-  // 3. PRODUCTS (Scalable Pagination)
+  // 3. PRODUCTS (Inventory)
   // ==========================================
 
+  // Returns ProductSummary for the Data Tables (lighter object)
   Future<List<ProductSummary>> getProductsPage({
-    int limit = 20,
+    int limit = 500, // Default higher limit for admin view
     DocumentSnapshot? lastDoc,
     String? searchQuery,
   }) async {
     Query query = _db.collection('products').where('isActive', isEqualTo: true);
 
     if (searchQuery != null && searchQuery.isNotEmpty) {
+      // Requires 'searchKeywords' array in Firestore document
       query = query.where('searchKeywords', arrayContains: searchQuery.toLowerCase());
     } else {
       query = query.orderBy('createdAt', descending: true);
@@ -91,25 +96,17 @@ class AdminService {
     }
 
     QuerySnapshot snapshot = await query.limit(limit).get();
-    return snapshot.docs
-        .map((doc) => ProductSummary.fromMap(doc.data() as Map<String, dynamic>, doc.id))
-        .toList();
+
+    return snapshot.docs.map((doc) {
+      return ProductSummary.fromMap(doc.data() as Map<String, dynamic>, doc.id);
+    }).toList();
   }
 
+  // Returns full Product details for Editing
   Future<Product?> getProductById(String id) async {
     final doc = await _db.collection('products').doc(id).get();
     if (!doc.exists) return null;
     return Product.fromMap(doc.data()!, doc.id);
-  }
-
-  Future<ProductSummary?> getProductBySku(String sku) async {
-    final snapshot = await _db.collection('products')
-        .where('sku', isEqualTo: sku)
-        .limit(1)
-        .get();
-
-    if (snapshot.docs.isEmpty) return null;
-    return ProductSummary.fromMap(snapshot.docs.first.data(), snapshot.docs.first.id);
   }
 
   Future<void> saveProduct({
@@ -124,13 +121,17 @@ class AdminService {
       thumbnailUrl = await ref.getDownloadURL();
     }
 
+    // Generate keywords for search
     final keywords = _generateKeywords(product.name);
 
     final data = product.toMap();
     data['thumbnailUrl'] = thumbnailUrl;
     data['searchKeywords'] = keywords;
+    data['isActive'] = true;
+    data['updatedAt'] = FieldValue.serverTimestamp();
 
     if (product.id.isEmpty) {
+      data['createdAt'] = FieldValue.serverTimestamp();
       await _db.collection('products').add(data);
     } else {
       await _db.collection('products').doc(product.id).update(data);
@@ -138,21 +139,24 @@ class AdminService {
   }
 
   Future<void> deleteProduct(String id) async {
+    // Soft delete by setting isActive to false
     await _db.collection('products').doc(id).update({'isActive': false});
   }
 
   // ==========================================
   // 4. ORDERS & TRANSACTIONS
   // ==========================================
-  Stream<List<app_model.Order>> getOrdersStream({String statusFilter = 'all'}) {
+
+  Stream<List<Order>> getOrdersStream({String statusFilter = 'all'}) {
     Query query = _db.collection('orders').orderBy('createdAt', descending: true);
 
     if (statusFilter != 'all') {
-      query = query.where('status', isEqualTo: statusFilter);
+      // Ensure status case matches DB (lowercase is safer)
+      query = query.where('status', isEqualTo: statusFilter.toLowerCase());
     }
 
-    return query.limit(50).snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) => app_model.Order.fromMap(doc.data() as Map<String,dynamic>, doc.id)).toList();
+    return query.limit(100).snapshots().map((snapshot) {
+      return snapshot.docs.map((doc) => Order.fromMap(doc.data() as Map<String, dynamic>, doc.id)).toList();
     });
   }
 
@@ -163,6 +167,7 @@ class AdminService {
     });
   }
 
+  // Robust Transaction for POS to ensure stock isn't negative
   Future<void> processPosTransaction({
     required List<Map<String, dynamic>> items,
     required String userId,
@@ -172,30 +177,50 @@ class AdminService {
     final orderRef = _db.collection('orders').doc();
 
     await _db.runTransaction((transaction) async {
+      // 1. Pre-fetch all products involved
       List<DocumentSnapshot> productSnaps = [];
       for (var item in items) {
         productSnaps.add(await transaction.get(_db.collection('products').doc(item['productId'])));
       }
 
+      // 2. Validate and Deduct Stock
       for (int i = 0; i < productSnaps.length; i++) {
-        if (!productSnaps[i].exists) throw Exception("Product not found");
+        if (!productSnaps[i].exists) throw Exception("Product not found: ${items[i]['productId']}");
 
         final data = productSnaps[i].data() as Map<String, dynamic>;
-        final currentStock = data['stock']?['availableQty'] ?? 0;
+
+        // Handle different data structures for stock (flat 'totalStock' vs nested 'stock.availableQty')
+        int currentStock = 0;
+        if (data.containsKey('totalStock')) {
+          currentStock = (data['totalStock'] as num).toInt();
+        } else if (data['stock'] != null && data['stock'] is Map) {
+          currentStock = (data['stock']['availableQty'] as num).toInt();
+        }
+
         final requestedQty = items[i]['quantity'] as int;
 
         if (currentStock < requestedQty) {
           throw Exception("Insufficient stock for ${data['name']}");
         }
 
-        transaction.update(productSnaps[i].reference, {
-          'stock.availableQty': currentStock - requestedQty,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
+        // Apply update based on structure
+        if (data.containsKey('totalStock')) {
+          transaction.update(productSnaps[i].reference, {
+            'totalStock': currentStock - requestedQty,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        } else {
+          transaction.update(productSnaps[i].reference, {
+            'stock.availableQty': currentStock - requestedQty,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        }
 
+        // Log the movement
         final logRef = _db.collection('inventory_logs').doc();
         transaction.set(logRef, {
           'productId': productSnaps[i].id,
+          'productName': data['name'],
           'action': 'sale_pos',
           'change': -requestedQty,
           'staffId': userId,
@@ -203,20 +228,23 @@ class AdminService {
         });
       }
 
+      // 3. Create the Order
       transaction.set(orderRef, {
-        'orderId': orderRef.id,
+        'id': orderRef.id, // Explicit ID field often helpful
         'userId': 'POS-WALKIN',
         'staffId': userId,
         'items': items,
         'total': totalAmount,
-        'status': 'delivered',
+        'status': 'delivered', // POS is instant
         'source': 'pos',
         'paymentMethod': paymentMethod,
         'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
     });
   }
 
+  // Helper
   List<String> _generateKeywords(String title) {
     List<String> keywords = [];
     String temp = "";

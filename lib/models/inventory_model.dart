@@ -19,13 +19,34 @@ class ProductSummary {
   });
 
   factory ProductSummary.fromMap(Map<String, dynamic> data, String id) {
+    // Helper to extract image safely
+    String getImage() {
+      // Prioritize 'thumbnail' as per your DB schema
+      if (data['thumbnail'] != null && data['thumbnail'].toString().isNotEmpty) {
+        return data['thumbnail'];
+      }
+      if (data['thumbnailUrl'] != null && data['thumbnailUrl'].toString().isNotEmpty) {
+        return data['thumbnailUrl'];
+      }
+      if (data['imageUrl'] != null && data['imageUrl'].toString().isNotEmpty) {
+        return data['imageUrl'];
+      }
+      if (data['images'] != null && (data['images'] as List).isNotEmpty) {
+        return data['images'][0].toString();
+      }
+      return '';
+    }
+
     return ProductSummary(
       id: id,
       name: data['name'] ?? '',
       sku: data['sku'] ?? '',
       price: (data['price'] as num?)?.toDouble() ?? 0.0,
-      totalStock: data['stock']?['availableQty'] ?? 0, // aggregate
-      thumbnailUrl: data['thumbnailUrl'] ?? '',
+      // Handle both 'stock' map and flat 'availableQty' if structure varies
+      totalStock: (data['stock'] is Map)
+          ? (data['stock']['availableQty'] ?? 0)
+          : (data['availableQty'] ?? data['totalStock'] ?? 0),
+      thumbnailUrl: getImage(),
     );
   }
 }

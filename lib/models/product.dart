@@ -25,7 +25,7 @@ class Product {
     this.searchKeywords = const [],
   });
 
-  // ✅ FIX: Alias getter to resolve "thumbnailUrl isn't defined" error
+  // Getter alias for compatibility
   String get thumbnailUrl => imageUrl;
 
   Map<String, dynamic> toMap() {
@@ -33,35 +33,52 @@ class Product {
       'name': name,
       'description': description,
       'price': price,
-      'imageUrl': imageUrl,
-      // Optional: Save both if you are transitioning, or just rely on imageUrl
-      'thumbnailUrl': imageUrl,
+      // Save as 'thumbnail' to match your DB schema
+      'thumbnail': imageUrl,
+      'thumbnailUrl': imageUrl, // Keep for legacy if needed
       'categoryId': categoryId,
       'sku': sku,
       'isActive': isActive,
-      'stock': {'availableQty': stockQty}, // Nested stock for scalability
+      'stock': {'availableQty': stockQty},
       'searchKeywords': searchKeywords,
-      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
     };
   }
 
   factory Product.fromMap(Map<String, dynamic> data, String id) {
+    // Robust image extraction logic
+    String getImage() {
+      if (data['thumbnail'] != null && data['thumbnail'].toString().isNotEmpty) {
+        return data['thumbnail'];
+      }
+      if (data['thumbnailUrl'] != null && data['thumbnailUrl'].toString().isNotEmpty) {
+        return data['thumbnailUrl'];
+      }
+      if (data['imageUrl'] != null && data['imageUrl'].toString().isNotEmpty) {
+        return data['imageUrl'];
+      }
+      if (data['images'] != null && (data['images'] as List).isNotEmpty) {
+        return data['images'][0].toString();
+      }
+      return '';
+    }
+
     return Product(
       id: id,
       name: data['name'] ?? '',
       description: data['description'] ?? '',
       price: (data['price'] as num?)?.toDouble() ?? 0.0,
-      // ✅ FIX: Robust fallback to check both fields
-      imageUrl: data['imageUrl'] ?? data['thumbnailUrl'] ?? '',
+      imageUrl: getImage(),
       categoryId: data['categoryId'] ?? '',
       sku: data['sku'] ?? '',
       isActive: data['isActive'] ?? true,
-      stockQty: data['stock']?['availableQty'] ?? 0,
+      stockQty: (data['stock'] is Map)
+          ? (data['stock']['availableQty'] ?? 0)
+          : (data['availableQty'] ?? 0),
       searchKeywords: List<String>.from(data['searchKeywords'] ?? []),
     );
   }
 
-  // Helper to generate keywords for search
   static List<String> generateKeywords(String title) {
     List<String> keywords = [];
     String temp = "";
