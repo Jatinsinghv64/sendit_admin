@@ -1,49 +1,92 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:senditadmin/models/order.dart';
-import 'package:senditadmin/models/services/admin_service.dart';
+import 'package:fl_chart/fl_chart.dart'; // Ensure you have fl_chart in pubspec.yaml
+import '../../models/order.dart';
+import '../../models/services/admin_service.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final adminService = Provider.of<AdminService>(context);
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Admin Dashboard')),
+      appBar: AppBar(title: const Text("Dashboard")),
       body: StreamBuilder<List<Order>>(
-        stream: adminService.getOrders(),
+        // FIX: Use the correct method name 'getOrdersStream'
+        stream: AdminService().getOrdersStream(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
+
           if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
+            return Center(child: Text("Error: ${snapshot.error}"));
           }
 
           final orders = snapshot.data ?? [];
-          final totalOrders = orders.length;
+          final totalRevenue = orders.fold(0.0, (sum, o) => sum + o.total);
           final pendingOrders = orders.where((o) => o.status == 'pending').length;
-          final totalSales = orders
-              .where((o) => o.status == 'delivered')
-              .fold(0.0, (sum, item) => sum + item.total);
+          final deliveredOrders = orders.where((o) => o.status == 'delivered').length;
 
-          final posOrders = orders.where((o) => o.source == 'pos').length;
-          final appOrders = orders.where((o) => o.source == 'app').length;
-
-          return Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: GridView.count(
-              crossAxisCount: MediaQuery.of(context).size.width > 800 ? 4 : 2,
-              crossAxisSpacing: 16.0,
-              mainAxisSpacing: 16.0,
-              childAspectRatio: 1.3,
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildMetricCard('Total Orders', totalOrders.toString(), Icons.receipt_long, Colors.blue),
-                _buildMetricCard('Pending Orders', pendingOrders.toString(), Icons.pending_actions, Colors.orange),
-                _buildMetricCard('Total Sales', '₹${totalSales.toStringAsFixed(2)}', Icons.monetization_on, Colors.green),
-                _buildMetricCard('POS / App', '$posOrders / $appOrders', Icons.store, Colors.purple),
+                // Summary Cards
+                Row(
+                  children: [
+                    _buildSummaryCard(
+                        context,
+                        "Total Revenue",
+                        "₹${totalRevenue.toStringAsFixed(0)}",
+                        Colors.green
+                    ),
+                    const SizedBox(width: 16),
+                    _buildSummaryCard(
+                        context,
+                        "Orders",
+                        orders.length.toString(),
+                        Colors.blue
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    _buildSummaryCard(
+                        context,
+                        "Pending",
+                        pendingOrders.toString(),
+                        Colors.orange
+                    ),
+                    const SizedBox(width: 16),
+                    _buildSummaryCard(
+                        context,
+                        "Delivered",
+                        deliveredOrders.toString(),
+                        Colors.purple
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 32),
+                const Text("Recent Activity", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
+
+                // Simple Recent Orders List
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: orders.take(5).length,
+                  itemBuilder: (context, index) {
+                    final order = orders[index];
+                    return ListTile(
+                      title: Text("Order #${order.id.substring(0, 5)}"),
+                      subtitle: Text(order.status),
+                      trailing: Text("₹${order.total}"),
+                    );
+                  },
+                )
               ],
             ),
           );
@@ -52,19 +95,21 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildMetricCard(String title, String value, IconData icon, Color color) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
+  Widget _buildSummaryCard(BuildContext context, String title, String value, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Icon(icon, color: color, size: 30),
-            Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
-            Text(title, style: const TextStyle(fontSize: 14, color: Colors.grey)),
+            Text(title, style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Text(value, style: TextStyle(color: color, fontSize: 24, fontWeight: FontWeight.bold)),
           ],
         ),
       ),

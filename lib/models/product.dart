@@ -25,12 +25,17 @@ class Product {
     this.searchKeywords = const [],
   });
 
+  // ✅ FIX: Alias getter to resolve "thumbnailUrl isn't defined" error
+  String get thumbnailUrl => imageUrl;
+
   Map<String, dynamic> toMap() {
     return {
       'name': name,
       'description': description,
       'price': price,
       'imageUrl': imageUrl,
+      // Optional: Save both if you are transitioning, or just rely on imageUrl
+      'thumbnailUrl': imageUrl,
       'categoryId': categoryId,
       'sku': sku,
       'isActive': isActive,
@@ -46,7 +51,8 @@ class Product {
       name: data['name'] ?? '',
       description: data['description'] ?? '',
       price: (data['price'] as num?)?.toDouble() ?? 0.0,
-      imageUrl: data['imageUrl'] ?? '',
+      // ✅ FIX: Robust fallback to check both fields
+      imageUrl: data['imageUrl'] ?? data['thumbnailUrl'] ?? '',
       categoryId: data['categoryId'] ?? '',
       sku: data['sku'] ?? '',
       isActive: data['isActive'] ?? true,

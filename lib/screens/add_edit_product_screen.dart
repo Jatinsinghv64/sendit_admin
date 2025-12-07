@@ -1,70 +1,101 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import '../models/category.dart';
+import '../models/product.dart';
 import '../models/services/admin_service.dart';
 
-class AddEditCategoryScreen extends StatefulWidget {
-  final Category? category;
-  const AddEditCategoryScreen({super.key, this.category});
+class AddEditProductScreen extends StatefulWidget {
+  final String? productId; // Pass ID to force fresh fetch
+  const AddEditProductScreen({super.key, this.productId});
 
   @override
-  State<AddEditCategoryScreen> createState() => _AddEditCategoryScreenState();
+  State<AddEditProductScreen> createState() => _AddEditProductScreenState();
 }
 
-class _AddEditCategoryScreenState extends State<AddEditCategoryScreen> {
+class _AddEditProductScreenState extends State<AddEditProductScreen> {
   final _formKey = GlobalKey<FormState>();
-  late String _name;
+  final AdminService _service = AdminService();
+
+  Product? _product;
+  bool _isLoading = true;
+
+  // Form Fields
+  String _name = '';
+  String _sku = '';
+  double _price = 0.0;
+  int _qty = 0;
+  String _unit = 'units';
+  String _categoryId = '';
+  String _description = ''; // Added description field
   File? _imageFile;
-  bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _name = widget.category?.name ?? '';
+    _loadData();
   }
 
-  Future<void> _pickImage() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-    if (picked != null) {
-      setState(() => _imageFile = File(picked.path));
+  Future<void> _loadData() async {
+    if (widget.productId != null) {
+      _product = await _service.getProductById(widget.productId!);
+      if (_product != null) {
+        _name = _product!.name;
+        _sku = _product!.sku;
+        _price = _product!.price;
+        // FIX: Use the correct getter 'stockQty' from the Product model
+        _qty = _product!.stockQty;
+        _description = _product!.description;
+        _categoryId = _product!.categoryId;
+        // Note: 'unit' is not in the top-level Product model provided earlier,
+        // assuming it's standardized or managed elsewhere.
+        // If needed, add 'unit' to your Product model.
+      }
     }
+    setState(() => _isLoading = false);
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     _formKey.currentState!.save();
-
     setState(() => _isLoading = true);
 
     try {
-      if (widget.category == null) {
-        await AdminService().createCategory(_name, _imageFile);
-      } else {
-        await AdminService().updateCategory(
-            widget.category!.id,
-            _name,
-            _imageFile,
-            widget.category!.imageUrl
-        );
-      }
+      final newProduct = Product(
+        id: widget.productId ?? '',
+        name: _name,
+        description: _description,
+        price: _price,
+        categoryId: _categoryId,
+        // FIX: Use 'imageUrl' as defined in the Product constructor.
+        // If _product is null, pass empty string.
+        imageUrl: _product?.imageUrl ?? '',
+        // FIX: Pass stockQty using the named parameter 'stockQty'
+        stockQty: _qty,
+        sku: _sku,
+        isActive: true,
+      );
+
+      await _service.saveProduct(product: newProduct, imageFile: _imageFile);
       if (mounted) Navigator.pop(context);
-    } catch(e) {
-      if(mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
-      }
+    } catch (e) {
+      if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
     } finally {
       if(mounted) setState(() => _isLoading = false);
     }
   }
 
+  Future<void> _pickImage() async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (picked != null) setState(() => _imageFile = File(picked.path));
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+
     return Scaffold(
-      appBar: AppBar(title: Text(widget.category == null ? "New Category" : "Edit Category")),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Padding(
+      appBar: AppBar(title: Text(widget.productId == null ? "New Product" : "Edit Product")),
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Form(
           key: _formKey,
@@ -72,46 +103,59 @@ class _AddEditCategoryScreenState extends State<AddEditCategoryScreen> {
             children: [
               GestureDetector(
                 onTap: _pickImage,
-                child: CircleAvatar(
-                  radius: 50,
-                  backgroundColor: Colors.grey[200],
-                  backgroundImage: _imageFile != null
-                      ? FileImage(_imageFile!)
-                      : (widget.category?.imageUrl.isNotEmpty == true
-                      ? NetworkImage(widget.category!.imageUrl) as ImageProvider
-                      : null),
-                  child: (_imageFile == null && (widget.category?.imageUrl.isEmpty ?? true))
-                      ? const Icon(Icons.camera_alt, size: 30)
-                      : null,
+                child: Container(
+                  height: 150, width: 150,
+                  color: Colors.grey[200],
+                  child: _imageFile != null
+                      ? Image.file(_imageFile!, fit: BoxFit.cover)
+                      : (_product?.imageUrl.isNotEmpty == true
+                  // FIX: Use alias getter 'thumbnailUrl' or 'imageUrl'
+                      ? Image.network(_product!.imageUrl, fit: BoxFit.cover)
+                      : const Icon(Icons.add_a_photo)),
                 ),
               ),
               const SizedBox(height: 20),
               TextFormField(
                 initialValue: _name,
-                decoration: const InputDecoration(labelText: "Category Name", border: OutlineInputBorder()),
-                validator: (val) => val!.isEmpty ? "Required" : null,
-                onSaved: (val) => _name = val!,
+                decoration: const InputDecoration(labelText: "Name"),
+                onSaved: (v) => _name = v!,
+                validator: (v) => v!.isEmpty ? "Required" : null,
               ),
+              TextFormField(
+                initialValue: _sku,
+                decoration: const InputDecoration(labelText: "SKU / Barcode"),
+                onSaved: (v) => _sku = v!,
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      initialValue: _price.toString(),
+                      decoration: const InputDecoration(labelText: "Price"),
+                      keyboardType: TextInputType.number,
+                      onSaved: (v) => _price = double.parse(v!),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextFormField(
+                      initialValue: _qty.toString(),
+                      decoration: const InputDecoration(labelText: "Stock"),
+                      keyboardType: TextInputType.number,
+                      onSaved: (v) => _qty = int.parse(v!),
+                    ),
+                  ),
+                ],
+              ),
+              TextFormField(
+                initialValue: _description,
+                decoration: const InputDecoration(labelText: "Description"),
+                onSaved: (v) => _description = v!,
+                maxLines: 3,
+              ),
+              // Add Category Dropdown here using AdminService().getCategories()
               const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                    onPressed: _save,
-                    child: const Text("Save Category")
-                ),
-              ),
-              if (widget.category != null) ...[
-                const SizedBox(height: 10),
-                TextButton(
-                  onPressed: () async {
-                    // Add delete logic here
-                    await AdminService().deleteCategory(widget.category!.id);
-                    if (mounted) Navigator.pop(context);
-                  },
-                  style: TextButton.styleFrom(foregroundColor: Colors.red),
-                  child: const Text("Delete Category"),
-                )
-              ]
+              ElevatedButton(onPressed: _save, child: const Text("Save"))
             ],
           ),
         ),

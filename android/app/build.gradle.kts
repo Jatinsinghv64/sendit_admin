@@ -10,7 +10,8 @@ plugins {
 
 android {
     namespace = "com.example.senditadmin"
-    compileSdk = flutter.compileSdkVersion
+    // Keep this high to support modern plugins like mobile_scanner
+    compileSdk = 36
     ndkVersion = "29.0.13599879"
 
     compileOptions {
@@ -28,9 +29,10 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
 
-        // --- FIX IS HERE ---
+        // --- FIX APPLIED HERE ---
+        // Set the minimum SDK to a lower version (like 23) so the app installs on older devices.
         minSdkVersion(23)
-        // -------------------
+        // ------------------------
 
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
