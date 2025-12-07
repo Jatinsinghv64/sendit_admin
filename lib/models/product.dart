@@ -5,21 +5,40 @@ class Product {
   final String name;
   final String description;
   final double price;
+  final String imageUrl;
   final String categoryId;
-  final String thumbnailUrl;
-  final Map<String, dynamic> stock; // {'availableQty': 100, 'unit': 'packets'}
-  final String sku; // Stock Keeping Unit / Barcode
+  final String sku;
+  final bool isActive;
+  final int stockQty; // Helper accessor
+  final List<String> searchKeywords;
 
   Product({
     required this.id,
     required this.name,
-    this.description = '',
+    required this.description,
     required this.price,
+    required this.imageUrl,
     required this.categoryId,
-    required this.thumbnailUrl,
-    required this.stock,
-    required this.sku,
+    this.sku = '',
+    this.isActive = true,
+    this.stockQty = 0,
+    this.searchKeywords = const [],
   });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'name': name,
+      'description': description,
+      'price': price,
+      'imageUrl': imageUrl,
+      'categoryId': categoryId,
+      'sku': sku,
+      'isActive': isActive,
+      'stock': {'availableQty': stockQty}, // Nested stock for scalability
+      'searchKeywords': searchKeywords,
+      'createdAt': FieldValue.serverTimestamp(),
+    };
+  }
 
   factory Product.fromMap(Map<String, dynamic> data, String id) {
     return Product(
@@ -27,23 +46,23 @@ class Product {
       name: data['name'] ?? '',
       description: data['description'] ?? '',
       price: (data['price'] as num?)?.toDouble() ?? 0.0,
+      imageUrl: data['imageUrl'] ?? '',
       categoryId: data['categoryId'] ?? '',
-      thumbnailUrl: data['thumbnailUrl'] ?? '',
-      stock: data['stock'] ?? {'availableQty': 0, 'unit': 'units'},
-      sku: data['sku'] ?? 'N/A',
+      sku: data['sku'] ?? '',
+      isActive: data['isActive'] ?? true,
+      stockQty: data['stock']?['availableQty'] ?? 0,
+      searchKeywords: List<String>.from(data['searchKeywords'] ?? []),
     );
   }
 
-  Map<String, dynamic> toMap() {
-    return {
-      'name': name,
-      'description': description,
-      'price': price,
-      'categoryId': categoryId,
-      'thumbnailUrl': thumbnailUrl,
-      'stock': stock,
-      'sku': sku,
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
+  // Helper to generate keywords for search
+  static List<String> generateKeywords(String title) {
+    List<String> keywords = [];
+    String temp = "";
+    for (int i = 0; i < title.length; i++) {
+      temp = temp + title[i].toLowerCase();
+      keywords.add(temp);
+    }
+    return keywords;
   }
 }

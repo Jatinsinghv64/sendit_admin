@@ -1,135 +1,109 @@
-import 'dart:io';
-import 'package:cloud_firestore/cloud_firestore.dart' hide Order; // <--- FIX: Hide 'Order' from Firestore
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:uuid/uuid.dart';
-
-// Use relative imports to avoid package naming issues
-import '../category.dart';
-import '../order.dart';
-import '../product.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../inventory_model.dart';
+import '../app_user.dart';
 
 class AdminService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance;
-  final Uuid _uuid = const Uuid();
 
-  // --- Utility Functions ---
-  Future<String> uploadFile(File file, String path) async {
-    final storageRef = _storage.ref().child(path).child(_uuid.v4());
-    final uploadTask = storageRef.putFile(file);
-    final snapshot = await uploadTask.whenComplete(() => null);
-    return await snapshot.ref.getDownloadURL();
-  }
-
-  // --- Category Management ---
-  Stream<List<Category>> getCategories() {
-    return _db.collection('categories').snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) => Category.fromMap(doc.data(), doc.id)).toList();
+  // --- 1. RBAC: Get Current User Role ---
+  Stream<AdminUser?> getCurrentUserStream(String uid) {
+    return _db.collection('users').doc(uid).snapshots().map((doc) {
+      if (!doc.exists) return null;
+      return AdminUser.fromMap(doc.data()!, doc.id);
     });
   }
 
-  Future<void> saveCategory({required String name, File? imageFile, String? id, String? existingImageUrl}) async {
-    String imageUrl = existingImageUrl ?? '';
-    if (imageFile != null) {
-      imageUrl = await uploadFile(imageFile, 'categories/images');
-    }
-    final data = {
-      'name': name,
-      'imageUrl': imageUrl,
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
-    if (id == null) {
-      data['createdAt'] = FieldValue.serverTimestamp();
-      await _db.collection('categories').add(data);
-    } else {
-      await _db.collection('categories').doc(id).update(data);
-    }
-  }
-
-  // --- Product Management ---
-  Stream<List<Product>> getProducts() {
-    return _db.collection('products').snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) => Product.fromMap(doc.data(), doc.id)).toList();
-    });
-  }
-
-  Future<void> saveProduct({
-    required Product product,
-    File? imageFile,
-    String? existingImageUrl,
+  // --- 2. Scalable Reads: Pagination ---
+  // Replaces "get all products" which crashes with 1000+ items
+  Future<List<ProductSummary>> getProductsPage({
+    int limit = 20,
+    DocumentSnapshot? lastDoc,
+    String? searchQuery,
   }) async {
-    String thumbnailUrl = product.thumbnailUrl;
-    if (imageFile != null) {
-      thumbnailUrl = await uploadFile(imageFile, 'products/thumbnails');
-    }
-    final data = product.toMap();
-    data['thumbnailUrl'] = thumbnailUrl;
+    Query query = _db.collection('products').where('isActive', isEqualTo: true);
 
-    if (product.id.isEmpty) {
-      data['createdAt'] = FieldValue.serverTimestamp();
-      await _db.collection('products').add(data);
+    if (searchQuery != null && searchQuery.isNotEmpty) {
+      // Note: Requires "searchKeywords" array in Firestore for each product
+      query = query.where('searchKeywords', arrayContains: searchQuery.toLowerCase());
     } else {
-      await _db.collection('products').doc(product.id).update(data);
+      query = query.orderBy('createdAt', descending: true);
     }
-  }
 
-  Future<void> deleteProduct(String productId) async {
-    await _db.collection('products').doc(productId).delete();
-  }
-
-  // --- Order Management ---
-  Stream<List<Order>> getOrders({String statusFilter = 'all'}) {
-    Query query = _db.collection('orders').orderBy('createdAt', descending: true);
-    if (statusFilter != 'all') {
-      query = query.where('status', isEqualTo: statusFilter);
+    if (lastDoc != null) {
+      query = query.startAfterDocument(lastDoc);
     }
-    return query.snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) {
-        // Explicit casting to Map<String, dynamic>
-        return Order.fromMap(doc.data() as Map<String, dynamic>, doc.id);
-      }).toList();
-    });
+
+    QuerySnapshot snapshot = await query.limit(limit).get();
+
+    return snapshot.docs
+        .map((doc) => ProductSummary.fromMap(doc.data() as Map<String, dynamic>, doc.id))
+        .toList();
   }
 
-  Future<void> updateOrderStatus(String orderId, String newStatus) async {
-    await _db.collection('orders').doc(orderId).update({
-      'status': newStatus,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-  }
-
-  // --- POS Management ---
-  Stream<List<Product>> getInventory() => getProducts();
-
-  Future<void> createPosOrder({
-    required List<Map<String, dynamic>> items,
-    required double total,
+  // --- 3. Robust Writes: Transactions ---
+  // Prevents race conditions (e.g., two people buying the last item)
+  Future<void> processTransaction({
+    required List<Map<String, dynamic>> items, // {productId, qty, name, price}
+    required String userId,
+    required double totalAmount,
     required String paymentMethod,
   }) async {
-    final orderId = "POS-${DateTime.now().millisecondsSinceEpoch}";
-    await _db.collection('orders').doc(orderId).set({
-      'orderId': orderId,
-      'userId': 'WALK-IN-CUSTOMER',
-      'items': items,
-      'subtotal': total,
-      'deliveryFee': 0,
-      'total': total,
-      'addressId': 'STORE_COUNTER',
-      'paymentMethod': paymentMethod,
-      'status': 'delivered',
-      'source': 'pos',
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    final orderRef = _db.collection('orders').doc();
 
-    final batch = _db.batch();
-    for (var item in items) {
-      // Ensure your Product model or Cart logic provides the correct ID here
-      final ref = _db.collection('products').doc(item['productId']);
-      batch.update(ref, {
-        'stock.availableQty': FieldValue.increment(-item['quantity'])
+    await _db.runTransaction((transaction) async {
+      // A. Read all product docs first (Rule of Firestore Transactions)
+      List<DocumentSnapshot> productSnapshots = [];
+      for (var item in items) {
+        DocumentReference ref = _db.collection('products').doc(item['productId']);
+        productSnapshots.add(await transaction.get(ref));
+      }
+
+      // B. Validate & Deduct Stock
+      for (int i = 0; i < productSnapshots.length; i++) {
+        final snapshot = productSnapshots[i];
+        final requestedQty = items[i]['quantity'] as int;
+
+        if (!snapshot.exists) {
+          throw Exception("Product ${items[i]['name']} not found!");
+        }
+
+        final data = snapshot.data() as Map<String, dynamic>;
+        final currentStock = data['stock']?['availableQty'] ?? 0;
+
+        if (currentStock < requestedQty) {
+          throw Exception("Insufficient stock for ${data['name']}. Available: $currentStock");
+        }
+
+        // Update Stock
+        transaction.update(snapshot.reference, {
+          'stock.availableQty': currentStock - requestedQty,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        // Audit Log
+        final logRef = _db.collection('inventory_logs').doc();
+        transaction.set(logRef, {
+          'productId': snapshot.id,
+          'action': 'sale',
+          'quantityChange': -requestedQty,
+          'orderId': orderRef.id,
+          'timestamp': FieldValue.serverTimestamp(),
+          'performedBy': userId,
+        });
+      }
+
+      // C. Create Order
+      transaction.set(orderRef, {
+        'orderId': orderRef.id,
+        'userId': 'POS-WALKIN',
+        'staffId': userId,
+        'items': items,
+        'total': totalAmount,
+        'status': 'delivered',
+        'source': 'pos',
+        'paymentMethod': paymentMethod,
+        'createdAt': FieldValue.serverTimestamp(),
       });
-    }
-    await batch.commit();
+    });
   }
 }
