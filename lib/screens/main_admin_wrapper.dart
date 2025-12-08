@@ -13,6 +13,11 @@ import 'order_list_screen.dart';
 class MainAdminWrapper extends StatelessWidget {
   const MainAdminWrapper({super.key});
 
+  // Static helper to allow children to open the drawer
+  static void openDrawer(BuildContext context) {
+    context.findAncestorStateOfType<_ResponsiveAdminLayoutState>()?.openDrawer();
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
@@ -38,7 +43,6 @@ class MainAdminWrapper extends StatelessWidget {
             final adminUser = userSnapshot.data;
 
             if (adminUser == null) {
-              // Pass UID to the error screen for debugging (logged to console)
               return _buildAccessDenied(context, "User profile not found in 'staff' collection.", currentUser.uid);
             }
 
@@ -50,7 +54,6 @@ class MainAdminWrapper extends StatelessWidget {
   }
 
   Widget _buildAccessDenied(BuildContext context, String message, String uid) {
-    // Log the ID to the console for the developer
     debugPrint("ACCESS DENIED - REQUIRED FIRESTORE DOC ID: $uid");
 
     return Scaffold(
@@ -65,12 +68,6 @@ class MainAdminWrapper extends StatelessWidget {
               const Text("Access Denied", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               Text(message, style: const TextStyle(color: Colors.grey), textAlign: TextAlign.center),
-              const SizedBox(height: 20),
-              const Text(
-                "Please contact your administrator or check the console for the required Document ID.",
-                style: TextStyle(fontSize: 12, color: Colors.orange),
-                textAlign: TextAlign.center,
-              ),
               const SizedBox(height: 30),
               OutlinedButton(
                 onPressed: () => FirebaseAuth.instance.signOut(),
@@ -93,15 +90,20 @@ class _ResponsiveAdminLayout extends StatefulWidget {
 }
 
 class _ResponsiveAdminLayoutState extends State<_ResponsiveAdminLayout> {
+  // GlobalKey to control the scaffold from child widgets
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
   int _selectedIndex = 0;
   bool _isExtended = true;
 
+  void openDrawer() {
+    _scaffoldKey.currentState?.openDrawer();
+  }
+
   @override
   Widget build(BuildContext context) {
-    // 1. Build Primary Navigation Menu (Bottom Nav / Sidebar)
     final List<Map<String, dynamic>> menuItems = [];
 
-    // Dashboard
     if (widget.user.canViewAnalytics) {
       menuItems.add({
         'icon': Icons.dashboard_rounded,
@@ -110,7 +112,6 @@ class _ResponsiveAdminLayoutState extends State<_ResponsiveAdminLayout> {
       });
     }
 
-    // Orders
     if (widget.user.canViewOrders) {
       menuItems.add({
         'icon': Icons.receipt_long_rounded,
@@ -119,7 +120,6 @@ class _ResponsiveAdminLayoutState extends State<_ResponsiveAdminLayout> {
       });
     }
 
-    // Inventory
     if (widget.user.canManageInventory) {
       menuItems.add({
         'icon': Icons.inventory_2_rounded,
@@ -133,7 +133,6 @@ class _ResponsiveAdminLayoutState extends State<_ResponsiveAdminLayout> {
       });
     }
 
-    // POS
     if (widget.user.canPerformPos) {
       menuItems.add({
         'icon': Icons.point_of_sale_rounded,
@@ -142,17 +141,14 @@ class _ResponsiveAdminLayoutState extends State<_ResponsiveAdminLayout> {
       });
     }
 
-    // 2. Handle Zero Permissions
     if (menuItems.isEmpty) {
       return const Scaffold(body: Center(child: Text("No access.")));
     }
 
-    // 3. Reset Index Safety
     if (_selectedIndex >= menuItems.length) {
       _selectedIndex = 0;
     }
 
-    // 4. Responsive Layout Builder
     return LayoutBuilder(
       builder: (context, constraints) {
         final isDesktop = constraints.maxWidth > 900;
@@ -160,27 +156,17 @@ class _ResponsiveAdminLayoutState extends State<_ResponsiveAdminLayout> {
         if (!isDesktop) {
           // --- MOBILE LAYOUT ---
           return Scaffold(
-            appBar: AppBar(
-              title: Text(menuItems[_selectedIndex]['label']),
-              // Ensure the drawer icon appears
-              leading: Builder(
-                builder: (context) => IconButton(
-                  icon: const Icon(Icons.menu),
-                  onPressed: () => Scaffold.of(context).openDrawer(),
-                ),
-              ),
-            ),
-            // DRAWER: Contains Profile & Settings ONLY
+            key: _scaffoldKey, // Assign the key here
+            // REMOVED APP BAR TO FIX DOUBLE HEADER ISSUE
             drawer: Drawer(
               child: Column(
                 children: [
                   _buildDrawerHeader(),
-                  // Settings Tile in Drawer
                   ListTile(
                     leading: const Icon(Icons.settings),
                     title: const Text("Settings"),
                     onTap: () {
-                      Navigator.pop(context); // Close drawer
+                      Navigator.pop(context);
                       Navigator.push(
                           context,
                           MaterialPageRoute(builder: (_) => SettingsScreen(user: widget.user))
@@ -193,13 +179,11 @@ class _ResponsiveAdminLayoutState extends State<_ResponsiveAdminLayout> {
                 ],
               ),
             ),
-            // BODY: Selected Page
             body: menuItems[_selectedIndex]['page'],
-            // BOTTOM NAV: Primary Navigation
             bottomNavigationBar: BottomNavigationBar(
               currentIndex: _selectedIndex,
               onTap: (index) => setState(() => _selectedIndex = index),
-              type: BottomNavigationBarType.fixed, // Ensure >3 items show labels
+              type: BottomNavigationBarType.fixed,
               selectedItemColor: Theme.of(context).primaryColor,
               unselectedItemColor: Colors.grey,
               items: menuItems.map((item) => BottomNavigationBarItem(
@@ -210,9 +194,7 @@ class _ResponsiveAdminLayoutState extends State<_ResponsiveAdminLayout> {
           );
         }
 
-        // --- DESKTOP LAYOUT (Unchanged, Sidebar works best here) ---
-        // Add Settings to sidebar for desktop consistency if desired,
-        // or keep it separate. I'll add it to the sidebar for desktop UX.
+        // --- DESKTOP LAYOUT ---
         final desktopMenuItems = List<Map<String, dynamic>>.from(menuItems);
         desktopMenuItems.add({
           'icon': Icons.settings_rounded,
@@ -220,7 +202,6 @@ class _ResponsiveAdminLayoutState extends State<_ResponsiveAdminLayout> {
           'page': SettingsScreen(user: widget.user)
         });
 
-        // Adjust index for desktop list if we were on a page that exists in mobile but index shifted
         int desktopIndex = _selectedIndex;
         if (desktopIndex >= desktopMenuItems.length) desktopIndex = 0;
 
@@ -232,10 +213,6 @@ class _ResponsiveAdminLayoutState extends State<_ResponsiveAdminLayout> {
                 backgroundColor: Colors.white,
                 selectedIndex: desktopIndex,
                 onDestinationSelected: (int index) {
-                  // Map desktop index back to mobile index logic if needed,
-                  // but for simple switching we just update state.
-                  // Note: Switching from Desktop Settings (last item) to Mobile
-                  // might cause index out of bounds if not careful, handled by the reset check above.
                   setState(() => _selectedIndex = index);
                 },
                 leading: Column(
@@ -270,6 +247,7 @@ class _ResponsiveAdminLayoutState extends State<_ResponsiveAdminLayout> {
               Expanded(
                 child: Column(
                   children: [
+                    // Desktop Header
                     Container(
                       height: 60,
                       color: Colors.white,

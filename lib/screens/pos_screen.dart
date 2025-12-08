@@ -3,6 +3,7 @@ import 'package:flutter/services.dart'; // For HapticFeedback
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/inventory_model.dart';
 import '../models/services/admin_service.dart';
+import 'main_admin_wrapper.dart';
 
 class PosScreen extends StatefulWidget {
   const PosScreen({super.key});
@@ -30,7 +31,7 @@ class _PosScreenState extends State<PosScreen> {
 
   Future<void> _loadInventory() async {
     try {
-      final prods = await _service.getProductsPage(limit: 1000); // Fetch more for POS cache
+      final prods = await _service.getProductsPage(limit: 1000);
       if (mounted) {
         setState(() {
           _allProducts = prods;
@@ -55,7 +56,6 @@ class _PosScreenState extends State<PosScreen> {
       } else {
         _filteredProducts = _allProducts.where((p) {
           final name = (p.name ?? '').toLowerCase();
-          // Ensure SKU is treated safely
           final sku = p.sku.toLowerCase();
           final searchLower = query.toLowerCase();
 
@@ -69,9 +69,7 @@ class _PosScreenState extends State<PosScreen> {
     HapticFeedback.selectionClick();
     final index = _cart.indexWhere((item) => item['productId'] == product.id);
 
-    // Check stock limit in local cart state
     int currentQtyInCart = index >= 0 ? _cart[index]['quantity'] : 0;
-    // Safe null check for totalStock
     int stock = product.totalStock ?? 0;
 
     if (currentQtyInCart >= stock) {
@@ -91,7 +89,7 @@ class _PosScreenState extends State<PosScreen> {
           'name': product.name ?? 'Unknown Item',
           'price': product.price ?? 0.0,
           'quantity': 1,
-          'product': product, // Kept for local logic, but must be removed before saving
+          'product': product,
         });
       }
     });
@@ -118,11 +116,9 @@ class _PosScreenState extends State<PosScreen> {
       final user = FirebaseAuth.instance.currentUser;
       final userId = user?.uid ?? 'unknown_staff';
 
-      // CLEANUP: Remove the 'product' object from cart items before sending to Firestore
-      // Firestore cannot serialize custom objects like ProductSummary
       final List<Map<String, dynamic>> cleanItems = _cart.map((item) {
         final cleanItem = Map<String, dynamic>.from(item);
-        cleanItem.remove('product'); // Remove the custom object
+        cleanItem.remove('product');
         return cleanItem;
       }).toList();
 
@@ -136,7 +132,6 @@ class _PosScreenState extends State<PosScreen> {
       if (mounted) {
         setState(() => _cart.clear());
         _showSuccessDialog();
-        // Reload inventory to reflect stock changes
         _loadInventory();
       }
     } catch (e) {
@@ -173,12 +168,11 @@ class _PosScreenState extends State<PosScreen> {
       body: SafeArea(
         child: Row(
           children: [
-            // LEFT PANEL: Product Catalog
             Expanded(
               flex: 65,
               child: Column(
                 children: [
-                  _buildCatalogHeader(),
+                  _buildCatalogHeader(isDesktop),
                   Expanded(
                     child: _isInitLoading
                         ? const Center(child: CircularProgressIndicator())
@@ -190,7 +184,6 @@ class _PosScreenState extends State<PosScreen> {
 
             const VerticalDivider(width: 1, thickness: 1, color: Color(0xFFE5E7EB)),
 
-            // RIGHT PANEL: Cart & Checkout
             Expanded(
               flex: 35,
               child: Container(
@@ -210,16 +203,26 @@ class _PosScreenState extends State<PosScreen> {
     );
   }
 
-  // --- Left Panel Widgets ---
-
-  Widget _buildCatalogHeader() {
+  Widget _buildCatalogHeader(bool isDesktop) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       color: Colors.white,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("POS Terminal", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF111827))),
+          Row(
+            children: [
+              if (!isDesktop)
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: IconButton(
+                    icon: const Icon(Icons.menu),
+                    onPressed: () => MainAdminWrapper.openDrawer(context),
+                  ),
+                ),
+              const Text("POS Terminal", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF111827))),
+            ],
+          ),
           const SizedBox(height: 16),
           TextField(
             controller: _searchController,
@@ -263,7 +266,7 @@ class _PosScreenState extends State<PosScreen> {
       padding: const EdgeInsets.all(16),
       gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: 200,
-        childAspectRatio: 0.75, // Taller for better vertical text fit
+        childAspectRatio: 0.75,
         crossAxisSpacing: 16,
         mainAxisSpacing: 16,
       ),
@@ -292,7 +295,6 @@ class _PosScreenState extends State<PosScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Image
             Expanded(
               flex: 5,
               child: Container(
@@ -302,23 +304,16 @@ class _PosScreenState extends State<PosScreen> {
                       ? DecorationImage(
                     image: NetworkImage(imageUrl),
                     fit: BoxFit.cover,
-                    // Add error builder to handle failed image loads
-                    onError: (exception, stackTrace) {
-                      // This ensures if network image fails, it falls back gracefully visually
-                      // (though DecorationImage doesn't support errorBuilder directly in all contexts,
-                      //  using a child with error handling is safer for NetworkImage widgets,
-                      //  but for DecorationImage we rely on it working or showing the child below)
-                    },
+                    onError: (exception, stackTrace) {},
                   )
                       : null,
                 ),
                 child: (imageUrl == null || imageUrl.isEmpty)
                     ? Icon(Icons.image_not_supported_outlined, color: Colors.grey.shade300, size: 40)
-                    : null, // If image fails to load, the container background shows. Ideally use Image.network with errorBuilder for robust handling.
+                    : null,
               ),
             ),
 
-            // Info
             Expanded(
               flex: 4,
               child: Padding(
@@ -328,7 +323,7 @@ class _PosScreenState extends State<PosScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      p.name ?? 'Unknown Product', // Fixed: Null check for name
+                      p.name ?? 'Unknown Product',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, height: 1.2),
@@ -338,7 +333,7 @@ class _PosScreenState extends State<PosScreen> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          "₹${(p.price ?? 0).toInt()}", // Fixed: Null check for price
+                          "₹${(p.price ?? 0).toInt()}",
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF111827)),
                         ),
                         _buildStockBadge(stock),
@@ -421,7 +416,6 @@ class _PosScreenState extends State<PosScreen> {
           padding: const EdgeInsets.symmetric(vertical: 12),
           child: Row(
             children: [
-              // Qty Controls
               Container(
                 decoration: BoxDecoration(
                   border: Border.all(color: Colors.grey.shade300),
@@ -445,8 +439,6 @@ class _PosScreenState extends State<PosScreen> {
                 ),
               ),
               const SizedBox(width: 12),
-
-              // Name
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -456,8 +448,6 @@ class _PosScreenState extends State<PosScreen> {
                   ],
                 ),
               ),
-
-              // Total
               Text(
                 "₹${totalItemPrice.toStringAsFixed(0)}",
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),

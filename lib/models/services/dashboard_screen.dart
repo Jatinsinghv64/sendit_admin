@@ -2,15 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // For HapticFeedback
 import '../../models/order.dart';
 import '../../models/services/admin_service.dart';
+import '../../screens/main_admin_wrapper.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // 1. Safe Area & Background configuration
+    final isDesktop = MediaQuery.of(context).size.width > 800;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF3F4F6), // Cool Grey 100
+      backgroundColor: const Color(0xFFF3F4F6),
       body: SafeArea(
         child: StreamBuilder<List<Order>>(
           stream: AdminService().getOrdersStream(),
@@ -21,35 +23,28 @@ class DashboardScreen extends StatelessWidget {
 
             final orders = snapshot.data ?? [];
 
-            // Calculate Metrics
             final double totalRevenue = orders.fold(0.0, (sum, o) => sum + o.total);
             final int pendingOrders = orders.where((o) => o.status == 'pending').length;
             final int delivered = orders.where((o) => o.status == 'delivered').length;
             final int cancelled = orders.where((o) => o.status == 'cancelled').length;
 
-            final isDesktop = MediaQuery.of(context).size.width > 800;
-
             return RefreshIndicator(
               onRefresh: () async {
                 HapticFeedback.lightImpact();
-                // Simulate refresh delay or reload data logic
                 await Future.delayed(const Duration(milliseconds: 500));
               },
               child: CustomScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 slivers: [
-                  // A. Fixed Header
                   SliverToBoxAdapter(
-                    child: _buildHeader(),
+                    child: _buildHeader(context, isDesktop),
                   ),
 
-                  // B. Metrics Grid (Responsive)
                   SliverPadding(
                     padding: const EdgeInsets.all(16),
                     sliver: SliverGrid(
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: isDesktop ? 4 : 2, // 4 columns on desktop, 2 on mobile
-                        // UPDATED: Adjusted aspect ratio to 1.2 for mobile (taller cards) to prevent overflow
+                        crossAxisCount: isDesktop ? 4 : 2,
                         childAspectRatio: isDesktop ? 1.5 : 1.2,
                         crossAxisSpacing: 12,
                         mainAxisSpacing: 12,
@@ -87,7 +82,6 @@ class DashboardScreen extends StatelessWidget {
                     ),
                   ),
 
-                  // C. Section Title
                   const SliverToBoxAdapter(
                     child: Padding(
                       padding: EdgeInsets.fromLTRB(16, 8, 16, 12),
@@ -98,21 +92,20 @@ class DashboardScreen extends StatelessWidget {
                     ),
                   ),
 
-                  // D. Recent Transactions List
                   if (orders.isEmpty)
                     const SliverFillRemaining(
                       child: Center(child: Text("No transactions yet", style: TextStyle(color: Colors.grey))),
                     )
                   else
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 80), // Bottom padding
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
                       sliver: SliverList(
                         delegate: SliverChildBuilderDelegate(
                               (context, index) {
                             final order = orders[index];
                             return _buildTransactionCard(order);
                           },
-                          childCount: orders.take(20).length, // Limit to recent 20
+                          childCount: orders.take(20).length,
                         ),
                       ),
                     ),
@@ -126,7 +119,7 @@ class DashboardScreen extends StatelessWidget {
   }
 
   // --- Header Component ---
-  Widget _buildHeader() {
+  Widget _buildHeader(BuildContext context, bool isDesktop) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       decoration: BoxDecoration(
@@ -136,11 +129,23 @@ class DashboardScreen extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
             children: [
-              Text("Dashboard", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF111827))),
-              Text("Overview of business performance", style: TextStyle(fontSize: 13, color: Color(0xFF6B7280))),
+              if (!isDesktop)
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: IconButton(
+                    icon: const Icon(Icons.menu),
+                    onPressed: () => MainAdminWrapper.openDrawer(context),
+                  ),
+                ),
+              const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("Dashboard", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF111827))),
+                  Text("Overview of business performance", style: TextStyle(fontSize: 13, color: Color(0xFF6B7280))),
+                ],
+              ),
             ],
           ),
           Container(
@@ -159,7 +164,6 @@ class DashboardScreen extends StatelessWidget {
   // --- Stat Card Component ---
   Widget _buildStatCard(String title, String value, IconData icon, Color color, Color bgColor) {
     return Container(
-      // UPDATED: Reduced padding from 16 to 12 to save space
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -182,7 +186,6 @@ class DashboardScreen extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          // UPDATED: Wrapped text in Flexible to prevent overflow
           Flexible(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -190,7 +193,6 @@ class DashboardScreen extends StatelessWidget {
               children: [
                 Text(
                   value,
-                  // UPDATED: Slightly reduced font size from 22 to 20
                   style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF111827)),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

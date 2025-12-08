@@ -3,6 +3,7 @@ import 'package:flutter/services.dart'; // For HapticFeedback
 import '../models/order.dart';
 import '../models/services/admin_service.dart';
 import 'order_detail_screen.dart';
+import 'main_admin_wrapper.dart';
 
 class OrderListScreen extends StatefulWidget {
   const OrderListScreen({super.key});
@@ -18,13 +19,12 @@ class _OrderListScreenState extends State<OrderListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = MediaQuery.of(context).size.width > 800;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF3F4F6), // Cool Grey 100
+      backgroundColor: const Color(0xFFF3F4F6),
       body: SafeArea(
         child: StreamBuilder<List<Order>>(
-          // Fetch all orders effectively, filtering happens in UI for search,
-          // but we can pass statusFilter to service if optimization is needed later.
-          // For now, fetching 'all' allows client-side search across all statuses.
           stream: _service.getOrdersStream(statusFilter: 'all'),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
@@ -37,14 +37,13 @@ class _OrderListScreenState extends State<OrderListScreen> {
             return RefreshIndicator(
               onRefresh: () async {
                 HapticFeedback.lightImpact();
-                // Stream updates automatically, but we can delay slightly for UX
                 await Future.delayed(const Duration(milliseconds: 500));
               },
               child: CustomScrollView(
                 slivers: [
                   // 1. Header Area
                   SliverToBoxAdapter(
-                    child: _buildHeader(allOrders.length),
+                    child: _buildHeader(allOrders.length, isDesktop),
                   ),
 
                   // 2. Search & Filters
@@ -93,11 +92,9 @@ class _OrderListScreenState extends State<OrderListScreen> {
     String query = _searchController.text.toLowerCase();
 
     return orders.where((order) {
-      // 1. Search Filter
       bool matchesSearch = order.id.toLowerCase().contains(query);
       if (!matchesSearch) return false;
 
-      // 2. Status Filter
       if (_activeFilter == 'All') return true;
       return order.status.toLowerCase() == _activeFilter.toLowerCase();
     }).toList();
@@ -105,7 +102,7 @@ class _OrderListScreenState extends State<OrderListScreen> {
 
   // --- UI Components ---
 
-  Widget _buildHeader(int totalOrders) {
+  Widget _buildHeader(int totalOrders, bool isDesktop) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -115,17 +112,29 @@ class _OrderListScreenState extends State<OrderListScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
             children: [
-              Text(
-                  "Orders",
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF111827))
-              ),
-              SizedBox(height: 4),
-              Text(
-                  "Manage and track customer orders",
-                  style: TextStyle(fontSize: 13, color: Color(0xFF6B7280))
+              if (!isDesktop)
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: IconButton(
+                    icon: const Icon(Icons.menu),
+                    onPressed: () => MainAdminWrapper.openDrawer(context),
+                  ),
+                ),
+              const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                      "Orders",
+                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF111827))
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                      "Manage and track customer orders",
+                      style: TextStyle(fontSize: 13, color: Color(0xFF6B7280))
+                  ),
+                ],
               ),
             ],
           ),
@@ -152,7 +161,6 @@ class _OrderListScreenState extends State<OrderListScreen> {
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
       child: Column(
         children: [
-          // Search Bar
           TextField(
             controller: _searchController,
             onChanged: (val) => setState(() {}),
@@ -167,7 +175,6 @@ class _OrderListScreenState extends State<OrderListScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          // Filter Chips
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -211,7 +218,7 @@ class _OrderListScreenState extends State<OrderListScreen> {
         borderRadius: BorderRadius.circular(20),
         side: BorderSide(color: isSelected ? const Color(0xFF4338CA) : Colors.grey.shade300),
       ),
-      showCheckmark: false, // Cleaner look
+      showCheckmark: false,
     );
   }
 
@@ -236,7 +243,6 @@ class _OrderListScreenState extends State<OrderListScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Top Row: ID, Source, Date
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -270,7 +276,6 @@ class _OrderListScreenState extends State<OrderListScreen> {
 
                 const Divider(height: 24, color: Color(0xFFF3F4F6)),
 
-                // Middle Row: Items & Status
                 Row(
                   children: [
                     Expanded(
@@ -293,7 +298,6 @@ class _OrderListScreenState extends State<OrderListScreen> {
                   ],
                 ),
 
-                // Action Hint
                 const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
@@ -368,7 +372,6 @@ class _OrderListScreenState extends State<OrderListScreen> {
   }
 
   String _formatDate(DateTime date) {
-    // Simple formatter, typically use intl package in production
     return "${date.day}/${date.month} ${date.hour}:${date.minute.toString().padLeft(2, '0')}";
   }
 }

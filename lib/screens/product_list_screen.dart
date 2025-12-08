@@ -3,6 +3,7 @@ import 'package:flutter/services.dart'; // For HapticFeedback
 import '../models/inventory_model.dart';
 import '../models/services/admin_service.dart';
 import 'add_edit_product_screen.dart';
+import 'main_admin_wrapper.dart'; // Import for openDrawer
 
 class ProductListScreen extends StatefulWidget {
   const ProductListScreen({super.key});
@@ -28,8 +29,6 @@ class _ProductListScreenState extends State<ProductListScreen> {
 
   Future<void> _fetchProducts() async {
     try {
-      // In production, implement pagination.
-      // Fetching 500 items is a safe upper bound for a small-medium store.
       final items = await _service.getProductsPage(limit: 500);
       if (mounted) {
         setState(() {
@@ -69,12 +68,12 @@ class _ProductListScreenState extends State<ProductListScreen> {
     final isDesktop = MediaQuery.of(context).size.width > 800;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF3F4F6), // Cool Grey 100
+      backgroundColor: const Color(0xFFF3F4F6),
       body: SafeArea(
         child: Column(
           children: [
             // 1. Fixed Header
-            _buildHeader(context),
+            _buildHeader(context, isDesktop),
 
             // 2. Scrollable Body
             Expanded(
@@ -83,17 +82,12 @@ class _ProductListScreenState extends State<ProductListScreen> {
                 child: CustomScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   slivers: [
-                    // A. Metrics Section (Horizontal Scrollable)
                     SliverToBoxAdapter(
                       child: _buildMetricsSection(totalValue, lowStockCount, outOfStockCount),
                     ),
-
-                    // B. Search & Filters
                     SliverToBoxAdapter(
                       child: _buildSearchAndFilter(context),
                     ),
-
-                    // C. Content List/Table
                     if (_isLoading)
                       const SliverFillRemaining(
                         child: Center(child: CircularProgressIndicator()),
@@ -104,7 +98,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                       )
                     else
                       SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 80), // Bottom padding for FAB
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
                         sliver: isDesktop
                             ? _buildDesktopTable()
                             : _buildMobileList(),
@@ -126,7 +120,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
   }
 
   // --- Header ---
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader(BuildContext context, bool isDesktop) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -136,11 +130,24 @@ class _ProductListScreenState extends State<ProductListScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
             children: [
-              Text("Inventory", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF111827))),
-              Text("Manage stock & prices", style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+              // Show Menu button only on Mobile
+              if (!isDesktop)
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: IconButton(
+                    icon: const Icon(Icons.menu),
+                    onPressed: () => MainAdminWrapper.openDrawer(context),
+                  ),
+                ),
+              const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("Inventory", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF111827))),
+                  Text("Manage stock & prices", style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+                ],
+              ),
             ],
           ),
           IconButton(
@@ -215,7 +222,6 @@ class _ProductListScreenState extends State<ProductListScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          // Filter Chips (Scrollable Row to avoid overflow)
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -260,14 +266,12 @@ class _ProductListScreenState extends State<ProductListScreen> {
     );
   }
 
-  // --- Mobile List View (Card Based) ---
+  // --- Mobile List View ---
   Widget _buildMobileList() {
     return SliverList(
       delegate: SliverChildBuilderDelegate(
             (context, index) {
           final p = _filteredProducts[index];
-          final isOOS = p.totalStock <= 0;
-
           return Container(
             margin: const EdgeInsets.only(bottom: 12),
             decoration: BoxDecoration(
@@ -285,7 +289,6 @@ class _ProductListScreenState extends State<ProductListScreen> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Image
                       Container(
                         width: 60, height: 60,
                         decoration: BoxDecoration(
@@ -304,8 +307,6 @@ class _ProductListScreenState extends State<ProductListScreen> {
                             : null,
                       ),
                       const SizedBox(width: 12),
-
-                      // Details
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -336,7 +337,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
     );
   }
 
-  // --- Desktop Table View (Data Table) ---
+  // --- Desktop Table View ---
   Widget _buildDesktopTable() {
     return SliverToBoxAdapter(
       child: Card(
@@ -346,7 +347,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 800), // Force min width for table
+            constraints: const BoxConstraints(minWidth: 800),
             child: DataTable(
               headingRowColor: MaterialStateProperty.all(Colors.grey.shade50),
               dataRowMaxHeight: 60,

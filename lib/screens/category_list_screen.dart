@@ -3,6 +3,7 @@ import 'package:flutter/services.dart'; // For HapticFeedback
 import '../models/category.dart';
 import '../models/services/admin_service.dart';
 import 'add_edit_category_screen.dart';
+import 'main_admin_wrapper.dart';
 
 class CategoryListScreen extends StatefulWidget {
   const CategoryListScreen({super.key});
@@ -18,8 +19,10 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = MediaQuery.of(context).size.width > 800;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF3F4F6), // Cool Grey 100
+      backgroundColor: const Color(0xFFF3F4F6),
       body: SafeArea(
         child: StreamBuilder<List<Category>>(
           stream: _service.getCategoriesStream(),
@@ -41,7 +44,7 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
                 slivers: [
                   // 1. Header
                   SliverToBoxAdapter(
-                    child: _buildHeader(allCategories.length),
+                    child: _buildHeader(allCategories.length, isDesktop),
                   ),
 
                   // 2. Search Bar
@@ -69,7 +72,7 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
                       sliver: SliverGrid(
                         gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                           maxCrossAxisExtent: 200,
-                          childAspectRatio: 0.65, // Taller to fit controls
+                          childAspectRatio: 0.65,
                           crossAxisSpacing: 16,
                           mainAxisSpacing: 16,
                         ),
@@ -101,7 +104,7 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
     return categories.where((c) => c.name.toLowerCase().contains(_searchQuery.toLowerCase())).toList();
   }
 
-  Widget _buildHeader(int count) {
+  Widget _buildHeader(int count, bool isDesktop) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -111,17 +114,29 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
             children: [
-              Text(
-                "Categories",
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF111827)),
-              ),
-              SizedBox(height: 4),
-              Text(
-                "Manage store sections",
-                style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+              if (!isDesktop)
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: IconButton(
+                    icon: const Icon(Icons.menu),
+                    onPressed: () => MainAdminWrapper.openDrawer(context),
+                  ),
+                ),
+              const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Categories",
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF111827)),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    "Manage store sections",
+                    style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+                  ),
+                ],
               ),
             ],
           ),
@@ -163,7 +178,6 @@ class _CategoryListScreenState extends State<CategoryListScreen> {
 
   Widget _buildCategoryCard(Category category) {
     final Color themeColor = category.color;
-    final bool isWhite = category.themeColor == 0xFFFFFFFF;
 
     return Container(
       decoration: BoxDecoration(
