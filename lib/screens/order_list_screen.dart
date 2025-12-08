@@ -112,32 +112,41 @@ class _OrderListScreenState extends State<OrderListScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              if (!isDesktop)
-                Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: IconButton(
-                    icon: const Icon(Icons.menu),
-                    onPressed: () => MainAdminWrapper.openDrawer(context),
+          // Use Expanded here to allow the title area to take available space
+          Expanded(
+            child: Row(
+              children: [
+                if (!isDesktop)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: IconButton(
+                      icon: const Icon(Icons.menu),
+                      onPressed: () => MainAdminWrapper.openDrawer(context),
+                    ),
+                  ),
+                // Use Flexible here to handle long text
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                          "Orders",
+                          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF111827))
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "Manage and track customer orders",
+                        style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
                 ),
-              const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                      "Orders",
-                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF111827))
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                      "Manage and track customer orders",
-                      style: TextStyle(fontSize: 13, color: Color(0xFF6B7280))
-                  ),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
+          const SizedBox(width: 8), // Safety spacing
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
