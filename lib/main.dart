@@ -3,16 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:senditadmin/screens/main_admin_wrapper.dart';
 
+import 'models/services/OrderAlertListener.dart';
 import 'models/services/admin_service.dart';
-
+import 'firebase_options.dart'; // Ensure you have this
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // TODO: Replace with your actual Firebase initialization
-  // await Firebase.initializeApp(
-  //   options: DefaultFirebaseOptions.currentPlatform,
-  // );
-  await Firebase.initializeApp(); // For a generic setup
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   runApp(const AdminApp());
 }
@@ -24,7 +23,6 @@ class AdminApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        // Centralized AdminService accessible throughout the app
         Provider<AdminService>(create: (_) => AdminService()),
       ],
       child: MaterialApp(
@@ -34,7 +32,11 @@ class AdminApp extends StatelessWidget {
           visualDensity: VisualDensity.adaptivePlatformDensity,
           scaffoldBackgroundColor: Colors.grey[100],
         ),
-        home: const MainAdminWrapper(),
+        // Wrap the MainAdminWrapper with OrderAlertListener
+        // This ensures the popup can appear on top of any screen inside the admin panel
+        home: const OrderAlertListener(
+          child: MainAdminWrapper(),
+        ),
       ),
     );
   }
